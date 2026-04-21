@@ -1,0 +1,439 @@
+#Non Redunant ADC
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.fft import fft, ifft, fftfreq
+
+class FlashADC:
+    def __init__(self, n_bits, vfs,offset,gain,a2,a3):
+        self.n_bits = n_bits
+        self.vfs = vfs
+        self.delta = vfs / (2**n_bits)
+        
+        # Ideal references
+        self.ideal_refs = np.array([i * self.delta for i in range(1, 2**n_bits)])
+
+        # Apply distortion
+        self.ideal_refs = self.ideal_refs * (1 + gain)
+        self.ideal_refs = self.ideal_refs + offset
+        self.ideal_refs = self.ideal_refs + a2 * self.ideal_refs**2 + a3 * self.ideal_refs**3
+        
+        # Ensure monotonic ordering (important for flash ADC)
+        self.ideal_refs = np.sort(self.ideal_refs)
+    def quantize(self,vin):
+        return np.sum(vin >= self.ideal_refs)
+
+class MDAC:
+    def __init__(self,Vin,Vadc,Vref,e,offset,a2,a3):
+        # Vectorized quantization
+        self.D = np.array([self.quantize(v,Vref) for v in Vadc])
+        # DAC step size
+        self.Vdac = self.D * .25
+
+        # MDAC output
+        self.delt=abs(Vin-self.Vdac)
+        
+        self.Vout=self.gain(self.delt,4,Vref,e,offset,a2,a3)
+    def quantize(self,Vin,Vref):
+        v=Vin
+        Vre=Vref
+
+        if v < (2/8)*Vre:
+            return 0
+        elif v < (4/8)*Vre:
+            return 1
+        elif v < (6/8)*Vre:
+            return 2
+        else:
+            return 3
+            
+    def gain(self,Vin,G,Vref,e,offset,a2,a3):
+        Vout=(1+e)*G*Vin+a2*Vin**2+a3*Vin**3
+        return Vout
+#Non Redunant ADC Transfer Function
+
+fs = 1e6
+N = 2**8
+t = np.arange(N) / fs
+
+Vin = np.linspace(0, 1, N)
+n_bits = 3
+adc = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes = np.array([adc.quantize(v) for v in Vin])
+plt.figure(figsize=(10,6))
+plt.plot(t, (noisy_codes//2)*adc.delta*2,label="Ideal ADC")
+vout1=(noisy_codes*adc.delta)
+mdac1=MDAC(Vin,vout1,1,0,0,0,0)
+# ---------------- Plot styling ----------------
+plt.xlabel("Input Voltage (V)")
+plt.ylabel("Digital Output Code")
+plt.title("Flash ADC Transfer Characteristics")
+plt.grid(True)
+plt.legend()
+
+plt.figure(figsize=(10,6))
+plt.step(t, Vin,label="Input")
+plt.step(t, mdac1.Vout,label="MDAC 1")
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("MDAC Vs Input")
+plt.grid(True)
+plt.legend()
+
+#Second ADC
+
+adc2 = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes2 = np.array([adc2.quantize(v) for v in mdac1.Vout])
+plt.figure(figsize=(10,6))
+plt.step(t, (noisy_codes2//2)*adc.delta*2,label="Ideal ADC")
+
+vout2=(noisy_codes2*adc2.delta)
+mdac2=MDAC(mdac1.Vout,vout2,1,0,0,0,0)
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Input Voltage (V)")
+plt.ylabel("Digital Output Code")
+plt.title("Flash ADC Transfer Characteristics")
+plt.grid(True)
+plt.legend()
+
+plt.figure(figsize=(10,6))
+plt.step(t,  mdac1.Vout,label="Pipeline Input")
+plt.step(t, mdac2.Vout,label="MDAC2 Output")
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("MDAC Vs Input")
+plt.grid(True)
+plt.legend()
+
+#Third ADC
+
+adc3 = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes3 = np.array([adc3.quantize(v) for v in mdac2.Vout])
+plt.figure(figsize=(10,6))
+plt.step(t, (noisy_codes3//2)*adc.delta*2,label="Ideal ADC")
+vout3=(noisy_codes3*adc3.delta)
+mdac3=MDAC(mdac2.Vout,vout3,1,0,0,0,0)
+
+b = ((noisy_codes//2)+((noisy_codes2//2)/4)+((noisy_codes3//2)/16))*adc.delta*2
+plt.figure(figsize=(10,6))
+plt.step(t,  Vin,label="Input")
+plt.step(t, b,label="Pipeline Output")
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("Pipeline Result Vs Input")
+plt.grid(True)
+plt.legend()
+
+
+#Redunant ADC
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.fft import fft, ifft, fftfreq
+
+class FlashADC:
+    def __init__(self, n_bits, vfs,offset,gain,a2,a3):
+        self.n_bits = n_bits
+        self.vfs = vfs
+        self.delta = vfs / (2**n_bits)
+        
+        # Ideal references
+        self.ideal_refs = np.array([i * self.delta for i in range(1, 2**n_bits)])
+
+        # Apply distortion
+        self.ideal_refs = self.ideal_refs * (1 + gain)
+        self.ideal_refs = self.ideal_refs + offset
+        self.ideal_refs = self.ideal_refs + a2 * self.ideal_refs**2 + a3 * self.ideal_refs**3
+        
+        # Ensure monotonic ordering (important for flash ADC)
+        self.ideal_refs = np.sort(self.ideal_refs)
+    def quantize(self,vin):
+        return np.sum(vin >= self.ideal_refs)
+
+class MDAC:
+    def __init__(self,Vin,Vadc,Vref,e,offset,a2,a3):
+        # Vectorized quantization
+        D = np.array([self.quantize(v,Vref) for v in Vadc])
+        # DAC step size
+        Vdac = D * (1/8)
+
+        # MDAC output
+        delt=abs(Vin-Vdac)
+        out=self.gain(delt,8,Vref,e,offset,a2,a3)
+        for i in range(len(out)):
+            if out[i]>1:
+                out[i]=1
+        self.Vout=out
+    def quantize(self,Vin,Vref):
+        v=Vin
+        Vre=Vref
+
+        if v < (1/8)*Vre:
+            return 0
+        elif  v < (2/8)*Vre:
+            return 1
+        elif  v < (3/8)*Vre:
+            return 2
+        elif  v < (4/8)*Vre:
+            return 3
+        elif  v < (5/8)*Vre:
+            return 4
+        elif  v < (6/8)*Vre:
+            return 5
+        elif  v < (7/8)*Vre:
+            return 6
+        else:
+            return 7
+            
+    def gain(self,Vin,G,Vref,e,offset,a2,a3):
+        Vout=(1+e)*G*Vin+a2*Vin**2+a3*Vin**3
+        return Vout
+
+#Transfer Function
+
+fs = 1e6
+N = 2**8
+t = np.arange(N) / fs
+
+fin = fs * 1427	 / N   # coherent tone
+A = .49 * 1
+
+# Input signal
+Vin = A * np.sin(2*np.pi*fin*t)+.5
+n_bits = 3
+adc = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes = np.array([adc.quantize(v) for v in Vin])
+plt.figure(figsize=(10,6))
+plt.plot(Vin, (noisy_codes)*adc.delta,label="Ideal ADC")
+vout1=(noisy_codes*adc.delta)
+mdac1=MDAC(Vin,vout1,1,0,0,0,0)
+# ---------------- Plot styling ----------------
+plt.xlabel("Input Voltage (V)")
+plt.ylabel("Digital Output Code")
+plt.title("Flash ADC Transfer Characteristics")
+plt.grid(True)
+plt.legend()
+
+plt.figure(figsize=(10,6))
+plt.step(t, Vin,label="Input")
+plt.step(t, mdac1.Vout,label="MDAC 1")
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("MDAC Vs Input")
+plt.grid(True)
+plt.legend()
+
+#Second ADC
+
+adc2 = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes2 = np.array([adc2.quantize(v) for v in (mdac1.Vout)])
+plt.figure(figsize=(10,6))
+plt.step(mdac1.Vout, (noisy_codes2)*adc.delta,label="Ideal ADC")
+
+vout2=(noisy_codes2*adc.delta)
+mdac2=MDAC((mdac1.Vout),vout2,1,0,0,0,0)
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Input Voltage (V)")
+plt.ylabel("Digital Output Code")
+plt.title("Flash ADC Transfer Characteristics")
+plt.grid(True)
+plt.legend()
+
+plt.figure(figsize=(10,6))
+plt.step(t,  mdac1.Vout,label="Pipeline Input")
+plt.step(t, mdac2.Vout,label="MDAC2 Output")
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("MDAC Vs Input")
+plt.grid(True)
+plt.legend()
+
+#Third ADC
+
+adc3 = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes3 = np.array([adc3.quantize(v) for v in (mdac2.Vout)])
+plt.figure(figsize=(10,6))
+plt.step(t, (noisy_codes3)*adc.delta,label="Ideal ADC")
+plt.step(t, (noisy_codes2)*adc.delta,label="Pipeline Input")
+plt.step(t,(noisy_codes)*adc.delta,label="MDAC2 Output")
+vout3=(noisy_codes3*adc3.delta)
+
+b = ((noisy_codes+(noisy_codes2)/8)+(noisy_codes3//2)/16)*adc.delta
+plt.figure(figsize=(10,6))
+plt.step(t,  Vin,label="Input")
+plt.step(t, b,label="Pipeline Output")
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("Pipeline Result Vs Input")
+plt.grid(True)
+plt.legend()
+
+fs = 3e2
+N = 2**8
+t = np.arange(N) / fs
+
+Vin = np.linspace(0, 1, N)
+n_bits = 3
+adc = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes = np.array([adc.quantize(v) for v in Vin])
+plt.figure(figsize=(10,6))
+plt.plot(Vin, (noisy_codes)*adc.delta,label="Ideal ADC")
+vout1=(noisy_codes*adc.delta)
+mdac1=MDAC(Vin,vout1,1,0,0,0,0)
+# ---------------- Plot styling ----------------
+plt.xlabel("Input Voltage (V)")
+plt.ylabel("Digital Output Code")
+plt.title("Flash ADC Transfer Characteristics")
+plt.grid(True)
+plt.legend()
+
+plt.figure(figsize=(10,6))
+plt.step(t, Vin,label="Input")
+plt.step(t, mdac1.Vout,label="MDAC 1")
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("MDAC Vs Input")
+plt.grid(True)
+plt.legend()
+
+#Second ADC
+
+adc2 = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes2 = np.array([adc2.quantize(v) for v in (mdac1.Vout)])
+plt.figure(figsize=(10,6))
+plt.step(mdac1.Vout, (noisy_codes2)*adc.delta,label="Ideal ADC")
+
+vout2=(noisy_codes2*adc.delta)
+mdac2=MDAC((mdac1.Vout),vout2,1,0,0,0,0)
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Input Voltage (V)")
+plt.ylabel("Digital Output Code")
+plt.title("Flash ADC Transfer Characteristics")
+plt.grid(True)
+plt.legend()
+
+plt.figure(figsize=(10,6))
+plt.step(t,  mdac1.Vout,label="Pipeline Input")
+plt.step(t, mdac2.Vout,label="MDAC2 Output")
+
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("MDAC Vs Input")
+plt.grid(True)
+plt.legend()
+
+#Third ADC
+
+adc3 = FlashADC(n_bits,1,0,0,0,0)
+noisy_codes3 = np.array([adc3.quantize(v) for v in (mdac2.Vout)])
+plt.figure(figsize=(10,6))
+plt.step(t, (noisy_codes3)*adc.delta,label="Ideal ADC")
+plt.step(t, (noisy_codes2)*adc.delta,label="Pipeline Input")
+plt.step(t,(noisy_codes)*adc.delta,label="MDAC2 Output")
+vout3=(noisy_codes3*adc3.delta)
+
+#b = ((noisy_codes+(noisy_codes2)/8)+(noisy_codes3//2)/16)*adc.delta
+b = ((noisy_codes+(noisy_codes2)/8)+(noisy_codes3//2)/16)*adc.delta
+
+plt.figure(figsize=(10,6))
+plt.step(t,  Vin,label="Input")
+plt.step(t, b,label="Pipeline Output")
+# ---------------- Plot styling ----------------
+plt.xlabel("Time")
+plt.ylabel("Voltage (V)")
+plt.title("Pipeline Result Vs Input")
+plt.grid(True)
+plt.legend()
+
+#SNDR Error 
+
+fs = 1e6
+N = 2**8
+t = np.arange(N) / fs
+
+fin = fs * 23	 / N
+print(fin)# coherent tone
+A = .49 * 1
+
+# Input signal
+Vin = A * np.sin(2*np.pi*fin*t)+.5
+n_bits = 3
+swe=0
+plt.figure(figsize=(10,6))
+SNDR=[]
+D =[]
+ENOB=[]
+for z in range(50):
+    adc = FlashADC(n_bits,1,0,0,0,0)
+    noisy_codes = np.array([adc.quantize(v) for v in Vin])
+    vout1=(noisy_codes*adc.delta)
+    mdac1=MDAC(Vin,vout1,1,0,0,0,0)
+    #plt.step(t, b,label="Pipeline Output", color='gray', alpha=0.08)
+    # ---------------- Plot styling ----------------
+    
+    # Only positive frequencies
+    spectrum = np.fft.fft(mdac1.Vout)
+    spectrum = np.abs(spectrum[:N // 2])  # single-sided spectrum
+
+    # Power spectrum
+    power = spectrum ** 2
+
+    # Find fundamental frequency bin (ignore DC at index 0)
+    fundamental_bin = np.argmax(power[1:]) + 1
+
+    # Signal power (fundamental bin)
+    signal_power = power[fundamental_bin]
+
+    # Noise + distortion power (exclude DC and fundamental)
+    noise_distortion_power = np.sum(power[1:len(freq)]) - signal_power
+
+    # SNDR
+    sndr = signal_power / noise_distortion_power
+    sndr_db = 10 * np.log10(sndr)
+    enob=((sndr_db - 1.76) / 6.02)
+    ENOB.append(enob)
+
+    # Signal power = fundamental bin only
+    #signal_power = psd[fund_bin]
+    #noise_power = (np.sum(psd)-signal_power)
+    #sndr = 10 * np.log10(signal_power / noise_power)
+    SNDR.append(sndr)
+    D.append(swe)
+    swe+=1
+    plt.plot(freq, 10*np.log10(power))
+    
+plt.xlabel("Time")
+plt.ylabel("PSD (dB)")
+plt.title("Pipeline PSD")
+plt.grid(True)
+plt.show()
+
+
+plt.figure(figsize=(10,6))
+plt.step(D, SNDR)
+plt.xlabel("")
+plt.ylabel("SNDR (dB)")
+plt.title("Redundancy SNDR")
+plt.show()
+
+plt.figure(figsize=(10,6))
+plt.step(D, ENOB)
+plt.xlabel("")
+plt.ylabel("ENOB")
+plt.title("Redundancy ENOB")
+plt.show()
