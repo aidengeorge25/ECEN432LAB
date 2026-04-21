@@ -1,0 +1,45 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Input range
+Vin = np.linspace(0, 1, 1000)
+
+# 2.5-bit decision levels (ideal)
+def quantize(v,Vref):
+    if v < (3/16)*Vref:
+        return 0
+    if v < (5/16)*Vref:
+        return 1
+    elif v < (7/16)*Vref:
+        return 2
+    elif v < (9/16)*Vref:
+        return 3
+    elif v < (11/16)*Vref:
+        return 4
+    elif v < (13/16)*Vref:
+        return 5
+    else:
+        return 6
+
+# Vectorized quantization
+D = np.array([quantize(v,1) for v in Vin])
+
+# DAC step size
+Vdac = D * 0.125
+
+# MDAC output
+Vout = 4 * (Vin - Vdac)
+
+# Ideal output
+Videal = 4 * Vin
+
+# Plot
+plt.figure(figsize=(8,5))
+plt.plot(Vin, Vout, label="MDAC Output", linewidth=2)
+
+plt.title("2.5-bit MDAC Transfer Characteristic")
+plt.xlabel("Vin (normalized)")
+plt.ylabel("Vout")
+plt.grid(True)
+plt.legend()
+plt.show()
