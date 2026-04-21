@@ -1,0 +1,227 @@
+#PART 1
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Full-scale
+VFS = 1.0
+
+# Sweep input
+Vin = np.linspace(-1, VFS, 1000)
+
+# Ideal gain
+G = 4
+def gain(Vin,G,Vref):
+    offset = .2
+    e = .05
+    a2 = 0
+    a3 = 0
+    Vout=(1+e)*G*Vin+a2*Vin**2+a3*Vin**3
+    return Vout
+Vout_ideal = gain(Vin,G,1)
+
+# Plot
+plt.figure()
+plt.plot(Vin, Vout_ideal, label="Ideal (G=4)")
+plt.xlabel("Vin")
+plt.ylabel("Vout")
+plt.title("Ideal Residue Amplifier Transfer")
+plt.grid(True)
+plt.legend()
+plt.show()
+
+#PART 2
+# Signal parameters
+fs = 1e6
+N = 2**14
+t = np.arange(N) / fs
+
+fin = fs * 101 / N   # coherent tone
+A = .49 * VFS
+
+# Input signal
+Vin = A * np.sin(2*np.pi*fin*t)+.5
+
+# Ideal output
+Vout = gain(Vin,4,1)
+
+# FFT
+Vf = np.fft.fft(Vout * np.hanning(N))
+PSD = np.abs(Vf)**2
+
+freq = np.fft.fftfreq(N, 1/fs)
+
+# Only positive frequencies
+half = N//2
+PSD = PSD[:half]
+freq = freq[:half]
+
+# Fundamental bin
+PSD=np.array(PSD[10:len(PSD)])
+fund_bin = np.argmax(PSD)
+
+# Signal power
+signal_power = PSD[fund_bin]
+
+print(PSD[0])
+noise_power = (np.sum(PSD)-(signal_power))/N
+print(signal_power)
+print(noise_power)
+SNDR = 10*np.log10(signal_power / noise_power)
+ENOB = (SNDR - 1.76) / 6.02
+
+print("Ideal SNDR:", SNDR)
+print("Ideal ENOB:", ENOB)
+
+plt.figure()
+plt.plot(t[0:600],Vout[0:600])
+plt.title("Amplifier Output")
+plt.xlabel("Vin")
+plt.ylabel("Vout")
+plt.grid()
+plt.show()
+# Plot PSD
+plt.figure()
+plt.plot(freq[10:len(freq)], 10*np.log10(PSD))
+plt.title("PSD (Ideal)")
+plt.xlabel("Frequency")
+plt.ylabel("dB")
+plt.grid()
+plt.show()
+
+#PART 3
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Full-scale
+VFS = 1.0
+
+# Sweep input
+
+# Ideal gain
+G = 4
+def gain(Vin,G,Vref):
+    offset = .3
+    e = 0.05
+    a2 = 0.02
+    a3 = 0.01
+    print(a2)
+    Vout=(1+e)*G*Vin+a2*Vin**2+a3*Vin**3+offset
+    return Vout
+
+
+# Signal parameters
+fs = 1e6
+N = 2**12
+t = np.arange(N) / fs
+
+fin = fs * 7459 / N   # coherent tone
+A = .49 * VFS
+
+# Input signal
+Vin = A * np.sin(2*np.pi*fin*t)+.5
+
+# Ideal output
+Vout = gain(Vin,4,1)
+
+# FFT
+spectrum = np.fft.fft(Vout)
+spectrum = np.abs(spectrum[:N // 2])  # single-sided spectrum
+freq = np.fft.fftfreq(N, 1/fs)
+# Power spectrum
+power = spectrum ** 2
+half = N//2
+PSD = PSD[:half]
+freq = freq[:half]
+# Find fundamental frequency bin (ignore DC at index 0)
+fundamental_bin = np.argmax(power[1:]) +1
+
+# Signal power (fundamental bin)
+signal_power = power[fundamental_bin]
+
+# Noise + distortion power (exclude DC and fundamental)
+noise_distortion_power = np.sum(power[1:N]) - signal_power
+
+# SNDR
+sndr = signal_power / noise_distortion_power
+SNDR = 10 * np.log10(sndr)
+ENOB=((SNDR - 1.76) / 6.02)
+
+print("Ideal SNDR:", SNDR)
+print("Ideal ENOB:", ENOB)
+
+plt.figure()
+plt.plot(t[0:50],Vout[0:50])
+plt.title("Amplifier Output")
+plt.xlabel("Vin")
+plt.ylabel("Vout")
+plt.grid()
+plt.show()
+# Plot PSD
+plt.figure()
+plt.plot(freq, 10*np.log10(power))
+plt.title("PSD (Ideal)")
+plt.xlabel("Frequency")
+plt.ylabel("dB")
+plt.grid()
+plt.show()
+
+#PART 4 (a2 sweep)
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Full-scale
+VFS = 1.0
+
+# Sweep input
+
+# Ideal gain
+G = 4
+def gain(Vin,G,Vref,a_mod):
+    offset = 0
+    e = 0
+    a2 = a_mod
+    print(a2)
+    a3 = 0
+    Vout=(1+e)*G*Vin+(a2*Vin**2)+a3*Vin**3
+    return Vout
+
+
+# Signal parameters
+fs = 1e6
+N = 2**14
+t = np.arange(N) / fs
+
+fin = fs * 7459 / N   # coherent tone
+A = .49 * VFS
+print(fin)
+# Input signal
+Vin = A * np.sin(2*np.pi*fin*t)+.5
+a_mod=.001
+a_m=[]
+harmonic2=[]
+for z  in range(10):
+    # Ideal output
+    Vout = gain(Vin,4,1,a_mod)
+    a_m.append(a_mod)
+    a_mod+=.002
+    # FFT
+    Vf = np.fft.fft(Vout)
+    PSD = np.abs(Vf)**2
+    
+    freq = np.fft.fftfreq(N, 1/fs)
+    
+    # Only positive frequencies
+    half = N//2
+    PSD = PSD[:half]
+    freq = freq[:half]
+    fundamental_bin = np.argmax(PSD[1:]) +1
+    fundamental_bin2 = np.argmax(PSD[1:fundamental_bin]) +1
+    harmonic2.append(10*np.log10(PSD[fundamental_bin2]))
+
+plt.figure()
+plt.plot(a_m, harmonic2)
+plt.title("PSD a2 Sweep")
+plt.xlabel("a2 value")
+plt.ylabel("Second Harmonic dB")
+plt.grid()
+plt.show()
