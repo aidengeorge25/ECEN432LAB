@@ -1,0 +1,265 @@
+# Knob Affected Pipeline ADC
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.fft import fft, ifft, fftfreq
+
+class FlashADC:
+    def __init__(self, n_bits, vfs,offset,k):
+        self.n_bits = n_bits
+        self.vfs = vfs
+        self.delta = vfs / (2**n_bits)
+        self.k=k
+        # Ideal references
+        self.ideal_refs = np.array([i * self.delta for i in range(1, 2**n_bits)])
+
+        # Apply distortion
+        self.ideal_refs = self.ideal_refs# + offset + k
+        
+        # Ensure monotonic ordering (important for flash ADC)
+        self.ideal_refs = np.sort(self.ideal_refs)
+    def quantize(self,vin):
+        return np.sum(vin >= self.ideal_refs)
+
+class MDAC:
+    def __init__(self,Vin,Vadc,Vref,e,k):
+        # Vectorized quantization
+        self.D = np.array([self.quantize(v,Vref) for v in Vadc])
+        # DAC step size
+        self.Vdac = self.D * .25
+        self.e=e
+        self.k=k
+        # MDAC output
+        self.delt=(Vin-self.Vdac)
+        
+        self.Vout=self.gain(self.delt,4,1,self.e,self.k)
+    def v(self,Vin,Vadc):
+        # Vectorized quantization
+        self.quantize(Vin,1)
+        # DAC step size
+        self.Vdac = self.D * .25
+
+        # MDAC output
+        self.delt=(Vin-self.Vdac)
+        
+        return self.gain(self.delt,4,1,self.e,self.k),self.delt
+    def quantize(self,Vin,Vref):
+        v=Vin
+        Vre=Vref
+
+        if v < (2/8)*Vre:
+            return 0
+        elif v < (4/8)*Vre:
+            return 1
+        elif v < (6/8)*Vre:
+            return 2
+        else:
+            return 3
+            
+    def gain(self,Vin,G,Vref,e,k):
+        Vout=(1+k+e)*G*Vin
+        return Vout
+
+
+#Initial SNDR Test
+fs = 1e6
+N = 2**10
+t = np.arange(N) / fs
+
+fin = fs * 23	 / N
+print(fin)# coherent tone
+A = .49 * 1
+
+# Input signal
+Vin = A * np.sin(2*np.pi*fin*t)+.5
+n_bits = 2
+swe=0
+plt.figure(figsize=(10,6))
+SNDR=[]
+D =[]
+ENOB=[]
+k=0
+for z in range(100):
+    o1 = np.random.normal(0, .003,1)
+    o2 = np.random.normal(0, .003,1)
+    o3 = np.random.normal(0, .003,1)
+    o4 = np.random.normal(0, .003,1)
+    g =  np.random.normal(0, .003,1)
+    n_bits = 3
+    adc = FlashADC(n_bits,1,o1,0)
+    noisy_codes = np.array([adc.quantize(v) for v in Vin])
+    vout1=(noisy_codes*adc.delta)
+    mdac1=MDAC(Vin,noisy_codes,1,0,0)
+    
+    #Second ADC
+    
+    adc2 = FlashADC(n_bits,1,o2,0)
+    noisy_codes2 = np.array([adc2.quantize(v) for v in mdac1.Vout])
+    vout2=(noisy_codes2*adc2.delta)
+    mdac2=MDAC(mdac1.Vout,vout2,1,0,0)
+    
+    
+    #Third ADC
+    
+    adc3 = FlashADC(n_bits,1,o3,0)
+    noisy_codes3 = np.array([adc3.quantize(v) for v in mdac2.Vout])
+    vout3=(noisy_codes3*adc3.delta)
+    mdac3=MDAC(mdac2.Vout,vout3,1,0,0)
+    
+    #Fourth ADC
+    adc4 = FlashADC(n_bits,1,o4,k)
+    noisy_codes4 = np.array([adc4.quantize(v) for v in mdac3.Vout])
+    
+    b = ((noisy_codes)+((+noisy_codes2)/4)+((noisy_codes3)/16)+((noisy_codes4)/64))*adc.delta*2
+    # Only positive frequencies
+    #spectrum = np.fft.fft(b)
+    #spectrum = np.abs(spectrum[:N // 2])  # single-sided spectrum
+    b = b - np.mean(b)          # remove DC offset
+    spectrum = np.fft.rfft(b)
+    mag = np.abs(spectrum) / len(b)
+    mag[1:-1] *= 2
+    freqs = np.fft.rfftfreq(len(b), d=1/fs)
+    #freqs = np.fft.rfftfreq(N, d=1/fs)
+    #spectrum = np.fft.rfft(b)
+    #mag = np.abs(spectrum)
+    # Power spectrum
+    power = mag ** 2
+
+    # Find fundamental frequency bin (ignore DC at index 0)
+    fundamental_bin = np.argmax(power[1:]) + 1
+
+    # Signal power (fundamental bin)
+    signal_power = power[fundamental_bin]
+
+    # Noise + distortion power (exclude DC and fundamental)
+    noise_distortion_power = np.sum(power[1:]) - signal_power
+
+    # SNDR
+    sndr = signal_power / noise_distortion_power
+    sndr_db = 10 * np.log10(sndr)
+    enob=((sndr_db - 1.76) / 6.02)
+    ENOB.append(enob)
+    # Signal power = fundamental bin only
+    #signal_power = psd[fund_bin]
+    #noise_power = (np.sum(psd)-signal_power)
+    #sndr = 10 * np.log10(signal_power / noise_power)
+    SNDR.append(sndr)
+    D.append(swe)
+    plt.plot(freqs, 10 * np.log10(power))
+    swe+=1
+    
+plt.xlabel("Frequency (Hz)")
+plt.ylabel("Decible (dB)")
+plt.title("Pipeline PSD")
+plt.grid(True)
+plt.show()
+
+plt.figure(figsize=(10,6))
+plt.plot(D, SNDR)
+    
+plt.xlabel("Iteration")
+plt.ylabel("SNDR)")
+plt.title("8-Bit NonRedundant Pipeline SNDR")
+plt.grid(True)
+plt.show()
+plt.figure(figsize=(10,6))
+plt.plot(D, ENOB)
+    
+plt.xlabel("Iteration")
+plt.ylabel("ENOB)")
+plt.title("8-Bit NonRedundant Pipeline ENOB")
+plt.grid(True)
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+learning_rate = 1e-4
+
+vin_batch = np.linspace(0, 1, 256)
+
+for vin in vin_batch:
+
+    # =========================
+    # STAGE 1
+    # =========================
+    code = adc.quantize(vin)
+    dac = code * adc.delta
+
+    error, x = mdac1.v(vin, dac)
+
+    # LMS update ADC thresholds
+    adc.k += learning_rate * error * np.sign(vin - adc.ideal_refs[0])
+
+    mdac1.k += learning_rate * error * x
+
+
+
+
+
+
+#LMS ATTEMPT
+    # =========================
+    # STAGE 2
+    # =========================
+    v2 = mdac1.v(vin, dac)
+
+    code = adc2.quantize(v2)
+    dac = code * adc2.delta
+
+    error, x = mdac2.v(v2, dac)
+
+    adc2.k += learning_rate * error * np.sign(v2 - adc2.ideal_refs[0])
+    mdac2.k += learning_rate * error * x
+
+
+    # =========================
+    # STAGE 3
+    # =========================
+    v3 = mdac2.v(v2, dac)
+
+    code = adc3.quantize(v3)
+    dac = code * adc3.delta
+
+    error, x = mdac3.v(v3, dac)
+
+    adc3.k += learning_rate * error * np.sign(v3 - adc3.ideal_refs[0])
+
+
+    # =========================
+    # STAGE 4
+    # =========================
+    v4 = mdac3.v(v3, dac)
+
+    code = adc4.quantize(v4)
+    dac = code * adc4.delta
+
+    # final stage (no MDAC needed usually)
+    error = vin - v4
+
+    adc4.k += learning_rate * error * np.sign(v4 - adc4.ideal_refs[0])
